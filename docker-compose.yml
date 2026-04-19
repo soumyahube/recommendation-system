@@ -1,0 +1,171 @@
+services:
+
+  # -----------------------------
+  # PostgreSQL
+  # -----------------------------
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: movierec
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./movie-recommendation-system/backup_db.dump:/docker-entrypoint-initdb.d/backup_db.dump
+    ports:
+      - "5432:5432"
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # FastAPI
+  # -----------------------------
+  fastapi:
+    build: ./src/api
+    container_name: fastapi_service
+    ports:
+      - "8000:8000"
+    environment:
+      - TMDB_API_KEY=ce703cbcc8da689c5aa6a69369787ed9
+    volumes:
+      - ./src/api/models:/app/models
+    depends_on:
+      - db
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Streamlit
+  # -----------------------------
+  streamlit:
+    build: ./src/frontend
+    container_name: streamlit_service
+    ports:
+      - "8501:8501"
+    environment:
+      - FASTAPI_URL=http://fastapi:8000/api/v1
+      - TMDB_API_KEY=ce703cbcc8da689c5aa6a69369787ed9
+    depends_on:
+      - fastapi
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Zookeeper (obligatoire Kafka)
+  # -----------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Kafka Broker
+  # -----------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Kafka UI (Dashboard Web)
+  # -----------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Kafka Consumer (Python)
+  # -----------------------------
+  kafka-consumer:
+    build: ./src/kafka_consumer
+    container_name: kafka_consumer
+    depends_on:
+      - kafka
+      - db
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Airflow DB
+  # -----------------------------
+  airflow-db:
+    image: postgres:15
+    container_name: airflow_postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Airflow Scheduler
+  # -----------------------------
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: airflow_scheduler
+    depends_on:
+      - airflow-db
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: scheduler
+    networks:
+      - movie-network
+
+  # -----------------------------
+  # Airflow Web UI
+  # -----------------------------
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: airflow_webserver
+    depends_on:
+      - airflow-scheduler
+    ports:
+      - "8085:8080"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: webserver
+    networks:
+      - movie-network
+
+networks:
+  movie-network:
+    driver: bridge
+
+volumes:
+  pgdata:
