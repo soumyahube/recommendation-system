@@ -1,8 +1,6 @@
 services:
 
-  # -----------------------------
-  # PostgreSQL
-  # -----------------------------
+  # PostgreSQL Database
   db:
     image: postgres:15
     container_name: postgres_db
@@ -13,15 +11,49 @@ services:
       POSTGRES_DB: movierec
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./movie-recommendation-system/backup_db.dump:/docker-entrypoint-initdb.d/backup_db.dump
+      - ./data/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
       - "5432:5432"
+    command: 
+      - "postgres"
+      - "-c"
+      - "statement_timeout=0"           # ✅ Pas de timeout
+      - "-c"
+      - "idle_in_transaction_session_timeout=0"  # ✅ Pas de timeout en transaction
+      - "-c"
+      - "shared_buffers=256MB"          # ✅ Augmenter le buffer
+      - "-c"
+      - "effective_cache_size=1GB"      # ✅ Augmenter le cache
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d movierec"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - movie-network
 
-  # -----------------------------
-  # FastAPI
-  # -----------------------------
+  # Data Loader Service (chargement initial)
+  data-loader:
+    build:
+      context: .
+      dockerfile: ./data/database/Dockerfile
+    container_name: data_loader
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: admin
+      PGPASSWORD: admin123
+      PGDATABASE: movierec
+    volumes:
+      - ./data/raw/ml-25m:/app/data/raw/ml-25m:ro
+    networks:
+      - movie-network
+    profiles: ["data-init"]
+
+  # FastAPI Backend
   fastapi:
     build: ./src/api
     container_name: fastapi_service
@@ -29,49 +61,45 @@ services:
       - "8000:8000"
     environment:
       - TMDB_API_KEY=ce703cbcc8da689c5aa6a69369787ed9
+      - DB_HOST=db
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+      - DB_NAME=movierec
     volumes:
-      - ./src/api/models:/app/models
+       - "C:/docker-models:/app/models"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - movie-network
 
-  # -----------------------------
-  # Streamlit
-  # -----------------------------
+  # Streamlit Frontend
   streamlit:
     build: ./src/frontend
-    container_name: streamlit_service
+    container_name: streamlit_app
     ports:
       - "8501:8501"
     environment:
-      - FASTAPI_URL=http://fastapi:8000/api/v1
-      - TMDB_API_KEY=ce703cbcc8da689c5aa6a69369787ed9
+      - API_URL=http://fastapi:8000
+      - DB_HOST=db
     depends_on:
       - fastapi
     networks:
       - movie-network
 
-  # -----------------------------
-  # Zookeeper (obligatoire Kafka)
-  # -----------------------------
+  # Zookeeper (pour Kafka)
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
     networks:
       - movie-network
 
-  # -----------------------------
   # Kafka Broker
-  # -----------------------------
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka
+    container_name: kafka_broker
     depends_on:
       - zookeeper
     ports:
@@ -86,86 +114,87 @@ services:
     networks:
       - movie-network
 
-  # -----------------------------
-  # Kafka UI (Dashboard Web)
-  # -----------------------------
+  # Kafka UI (Dashboard)
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka_ui
-    depends_on:
-      - kafka
     ports:
-      - "8080:8080"
+      - "8082:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      - kafka
     networks:
       - movie-network
 
-  # -----------------------------
   # Kafka Consumer (Python)
-  # -----------------------------
   kafka-consumer:
     build: ./src/kafka_consumer
     container_name: kafka_consumer
+    environment:
+      KAFKA_BROKER: kafka:29092
+      DB_HOST: db
+      DB_USER: admin
+      DB_PASSWORD: admin123
+      DB_NAME: movierec
     depends_on:
       - kafka
       - db
     networks:
       - movie-network
 
-  # -----------------------------
-  # Airflow DB
-  # -----------------------------
+  # Airflow Database
   airflow-db:
     image: postgres:15
-    container_name: airflow_postgres
+    container_name: airflow_db_V2
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
     networks:
       - movie-network
 
-  # -----------------------------
   # Airflow Scheduler
-  # -----------------------------
   airflow-scheduler:
-    image: apache/airflow:2.9.3
-    container_name: airflow_scheduler
+    image: apache/airflow:2.8.0
+    container_name: airflow_scheduler_v2
+    command: scheduler
+    environment:
+      AIRFLOW_HOME: /airflow
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
     depends_on:
       - airflow-db
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db/airflow
     volumes:
-      - ./airflow/dags:/opt/airflow/dags
-    command: scheduler
+      - ./airflow/dags:/airflow/dags
     networks:
       - movie-network
 
-  # -----------------------------
-  # Airflow Web UI
-  # -----------------------------
+  # Airflow WebUI
   airflow-webserver:
-    image: apache/airflow:2.9.3
-    container_name: airflow_webserver
-    depends_on:
-      - airflow-scheduler
+    image: apache/airflow:2.8.0
+    container_name: airflow_webui_v2
+    command: webserver
     ports:
       - "8085:8080"
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW_HOME: /airflow
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    depends_on:
+      - airflow-db
     volumes:
-      - ./airflow/dags:/opt/airflow/dags
-    command: webserver
+      - ./airflow/dags:/airflow/dags
     networks:
       - movie-network
+
+volumes:
+  pgdata:
+  airflow_pgdata:
 
 networks:
   movie-network:
     driver: bridge
-
-volumes:
-  pgdata:

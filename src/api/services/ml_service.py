@@ -16,14 +16,16 @@ logger = logging.getLogger(__name__)
 class MLService:
     """Service ML avec gestion des mappings ID"""
     
-    def __init__(self, 
-                 model_path: str = "models/svd_best_model.pkl",
-                 mappings_path: str = "models/id_mappings.pkl"):
+    def __init__(self):
+                 
+        BASE_DIR = Path(__file__).resolve().parent.parent
         
+        
+        self.model_path = BASE_DIR / "models" / "svd_best_model.pkl"
+        self.mappings_path = BASE_DIR / "models" / "id_mappings.pkl"
+    
         self.model = None
-        self.model_path = model_path
-        self.mappings_path = mappings_path
-        
+
         # Mappings
         self.user_to_idx = {}  # Original → Factorized
         self.item_to_idx = {}  # Original → Factorized
@@ -37,7 +39,7 @@ class MLService:
     def load_model(self):
         """Charge le modèle SVD"""
         try:
-            model_file = Path("/app") / self.model_path
+            model_file = self.model_path
             logger.info(f"Chargement du modèle depuis: {model_file}")
             
             with open(model_file, 'rb') as f:
@@ -52,7 +54,7 @@ class MLService:
     def load_mappings(self):
         """Charge les mappings depuis id_mappings.pkl"""
         try:
-            mappings_file = Path("/app") / self.mappings_path
+            mappings_file = self.mappings_path
             logger.info(f"Chargement des mappings depuis: {mappings_file}")
             
             with open(mappings_file, 'rb') as f:
