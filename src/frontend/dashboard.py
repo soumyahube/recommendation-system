@@ -187,95 +187,97 @@ def rate_movie(user_id, movie_id, rating):
         st.error(f"❌ Erreur lors de l'envoi à Kafka: {e}")
         return None
 
+from utils_tmdb import get_poster_url, get_movie_details_tmdb
+import re
+
 def display_movie_card(movie, show_prediction=False):
-    """Affiche une carte de film avec poster"""
+    """Affiche une carte de film avec poster TMDb"""
     
-    # Extraire l'année du titre si possible
     title = movie.get("title", "")
-    year = None
     
-    # Essayer d'extraire l'année du titre (format commun: "Titre (1995)")
+    # Extraire l'année du titre
+    year = None
     year_match = re.search(r'\((\d{4})\)', title)
     if year_match:
         year = year_match.group(1)
-        # Titre sans l'année pour la recherche
-        clean_title = title.replace(f"({year})", "").strip()
-    else:
-        clean_title = title
-        year = movie.get("release_year")
     
-    # Récupérer le poster avec le titre et l'année
-    poster_url = get_movie_poster(title=clean_title, year=year)
+    # Récupérer les détails TMDb
+    tmdb_data = get_movie_details_tmdb(title, year)
+    poster_url = tmdb_data.get("poster_url")
+    overview = tmdb_data.get("overview", "")
+    tmdb_rating = tmdb_data.get("vote_average", 0)
     
-    # CSS pour la carte
-    st.markdown("""
-    <style>
-    .movie-card {
-        background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-        border-radius: 12px;
-        padding: 20px;
-        margin: 10px 0;
-        border: 2px solid #2d2d2d;
-        transition: all 0.3s ease;
-        cursor: pointer;
-        height: 100%;
-    }
-    .movie-card:hover {
-        transform: translateY(-8px) scale(1.02);
-        border-color: #E50914;
-        box-shadow: 0 12px 24px rgba(229, 9, 20, 0.4);
-    }
-    .genre-badge {
-        display: inline-block;
-        background-color: #E50914;
-        color: white;
-        padding: 5px 12px;
-        border-radius: 20px;
-        margin: 3px;
-        font-size: 12px;
-        font-weight: 600;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    # Genres
+    genres = movie.get("genres", "").split("|")[:3]
+    genres_html = " ".join([
+        f'<span style="background:#E50914;color:white;padding:3px 10px;'
+        f'border-radius:20px;margin:2px;font-size:11px;">{g}</span>'
+        for g in genres if g
+    ])
     
-    # Contenu de la carte
-    st.markdown("<div class='movie-card'>", unsafe_allow_html=True)
+    # Note prédite
+    prediction_html = ""
+    if show_prediction and "predicted_rating" in movie:
+        rating = movie["predicted_rating"]
+        stars = "⭐" * int(rating)
+        prediction_html = f"""
+        <div style='margin-top:8px;padding-top:8px;border-top:1px solid #333;'>
+            <span style='color:#FFD700;font-weight:bold;'>
+                {stars} {rating:.1f}/5.0
+            </span>
+        </div>
+        """
     
-    # Titre du film
-    st.markdown(f"<h3 style='color: #ffffff; margin-top: 0;'>{title}</h3>", unsafe_allow_html=True)
+    # TMDb rating
+    tmdb_html = ""
+    if tmdb_rating:
+        tmdb_html = f"""
+        <div style='color:#b3b3b3;font-size:12px;margin-top:4px;'>
+            🎬 TMDb: {tmdb_rating:.1f}/10
+        </div>
+        """
     
-    # Afficher le poster si disponible
-    col1, col2 = st.columns([1, 1])
+    # Overview
+    overview_html = ""
+    if overview:
+        short_overview = overview[:100] + "..." if len(overview) > 100 else overview
+        overview_html = f"""
+        <div style='color:#b3b3b3;font-size:12px;margin-top:8px;
+                    font-style:italic;'>
+            {short_overview}
+        </div>
+        """
+    
+    # Carte complète
+    col1, col2 = st.columns([1, 2])
+    
     with col1:
         if poster_url:
-            st.image(poster_url, width=150)
+            st.image(poster_url, width=120)
         else:
-            # Afficher un placeholder si pas de poster
             st.markdown("""
-            <div style='width:150px; height:225px; background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
-                        border-radius: 8px; display: flex; align-items: center; justify-content: center;
-                        border: 2px solid #E50914; margin-bottom: 10px;'>
-                <span style='color: #b3b3b3; font-size: 48px;'>🎬</span>
+            <div style='width:120px;height:180px;background:#2d2d2d;
+                        border-radius:8px;display:flex;align-items:center;
+                        justify-content:center;border:2px solid #E50914;'>
+                <span style='font-size:40px;'>🎬</span>
             </div>
             """, unsafe_allow_html=True)
     
     with col2:
-        # Genres
-        genres = movie.get("genres", "").split("|")[:3]
-        genres_html = '<br>'.join([f'<span class="genre-badge">{g}</span>' for g in genres if g])
-        st.markdown(f"<div>{genres_html}</div>", unsafe_allow_html=True)
-        
-        # ID du film
-        st.markdown(f"<div style='color:#b3b3b3;margin:8px 0;'>🎬 ID: {movie.get('movie_id')}</div>", unsafe_allow_html=True)
-        
-        # Note prédite si demandé
-        if show_prediction and 'predicted_rating' in movie:
-            rating = movie['predicted_rating']
-            stars = '⭐' * int(rating)
-            st.markdown(f"<div style='color: #FFD700; font-size: 16px;'>{stars} ({rating:.1f})</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style='padding:5px;'>
+            <h4 style='color:white;margin:0 0 8px 0;font-size:14px;'>
+                {title}
+            </h4>
+            <div>{genres_html}</div>
+            {tmdb_html}
+            {overview_html}
+            {prediction_html}
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.markdown("</div>", unsafe_allow_html=True)
-
+    st.markdown("<hr style='border-color:#2d2d2d;margin:5px 0;'>", 
+                unsafe_allow_html=True)
 # CSS personnalisé Netflix (global)
 st.markdown("""
 <style>
@@ -353,7 +355,7 @@ with st.sidebar:
     
     page = st.radio(
         "Navigation",
-        ["🏠 Accueil", "🎯 Recommandations", "🎬 Catalogue", "🔮 Prédiction"],
+        ["🏠 Accueil",  "👤 Mon Profil","🎯 Recommandations", "🎬 Catalogue", "🔮 Prédiction"],
         label_visibility="collapsed"
     )
     
@@ -426,6 +428,150 @@ if page == "🏠 Accueil":
                 display_movie_card(movie)
 
 # PAGE: RECOMMANDATIONS
+elif page == "👤 Mon Profil":
+    st.markdown("<h1>👤 Crée ton Profil Cinema</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#b3b3b3'>Dis-nous tes goûts pour des recommandations personnalisées</p>", unsafe_allow_html=True)
+    
+    # ============================================================
+    # ÉTAPE 1 : Genres préférés
+    # ============================================================
+    st.markdown("<h2>🎭 Tes genres préférés</h2>", unsafe_allow_html=True)
+    
+    all_genres = [
+        "Action", "Adventure", "Animation", "Comedy", "Crime",
+        "Documentary", "Drama", "Fantasy", "Horror", "Mystery",
+        "Romance", "Sci-Fi", "Thriller", "War", "Western"
+    ]
+    
+    selected_genres = st.multiselect(
+        "Choisis tes genres (max 5)",
+        all_genres,
+        max_selections=5,
+        default=["Action", "Comedy"]
+    )
+    
+    # ============================================================
+    # ÉTAPE 2 : Films favoris
+    # ============================================================
+    st.markdown("<h2>⭐ Tes films favoris</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#b3b3b3'>Note quelques films pour calibrer les recommandations</p>", unsafe_allow_html=True)
+    
+    # Films populaires à noter
+    popular_movies = {
+        1: "Toy Story (1995)",
+        260: "Star Wars (1977)", 
+        296: "Pulp Fiction (1994)",
+        318: "Shawshank Redemption (1994)",
+        356: "Forrest Gump (1994)",
+        480: "Jurassic Park (1993)",
+        2571: "Matrix, The (1999)",
+        58559: "Dark Knight (2008)",
+        79132: "Inception (2010)",
+        122882: "Interstellar (2014)"
+    }
+    
+    user_ratings = {}
+    
+    cols = st.columns(2)
+    for idx, (movie_id, title) in enumerate(popular_movies.items()):
+        with cols[idx % 2]:
+            rating = st.select_slider(
+                title,
+                options=[0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+                value=0,
+                key=f"rating_{movie_id}"
+            )
+            if rating > 0:
+                user_ratings[movie_id] = rating
+    
+    # ============================================================
+    # ÉTAPE 3 : Préférences supplémentaires
+    # ============================================================
+    st.markdown("<h2>🎬 Autres préférences</h2>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        era = st.radio(
+            "Époque préférée",
+            ["Peu importe", "Classiques (avant 1990)", 
+             "Années 90-2000", "Films récents (après 2010)"]
+        )
+    
+    with col2:
+        mood = st.radio(
+            "Humeur du moment",
+            ["Peu importe", "Quelque chose de fun 😄", 
+             "Film intense 😮", "Histoire touchante 😢",
+             "Faire peur 😱"]
+        )
+    
+    # ============================================================
+    # GÉNÉRER LES RECOMMANDATIONS
+    # ============================================================
+    if st.button("🎯 Générer mes recommandations personnalisées", 
+                  type="primary", use_container_width=True):
+        
+        if not selected_genres and not user_ratings:
+            st.warning("⚠️ Choisis au moins un genre ou note un film !")
+        else:
+            with st.spinner("🤖 Analyse de tes préférences..."):
+                
+                # Construire le profil utilisateur
+                profile = {
+                    "genres": selected_genres,
+                    "rated_movies": user_ratings,
+                    "era": era,
+                    "mood": mood
+                }
+                
+                # Utiliser un user_id basé sur les préférences
+                # (dans un vrai système on créerait un nouvel utilisateur)
+                base_user = 7  # user de référence
+                
+                # Récupérer les films filtrés par genre
+                all_reco = []
+                
+                genres_to_search = selected_genres if selected_genres else ["Action"]
+                
+                for genre in genres_to_search[:3]:
+                    response = requests.get(
+                        f"{API_URL}/recommend/{base_user}",
+                        params={"n": 10, "genre": genre},
+                        timeout=15
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        all_reco.extend(data.get("recommendations", []))
+                
+                # Dédupliquer et trier
+                seen = set()
+                unique_reco = []
+                for movie in all_reco:
+                    if movie['movie_id'] not in seen:
+                        seen.add(movie['movie_id'])
+                        # Exclure les films déjà notés
+                        if movie['movie_id'] not in user_ratings:
+                            unique_reco.append(movie)
+                
+                # Trier par note prédite
+                unique_reco.sort(
+                    key=lambda x: x['predicted_rating'], 
+                    reverse=True
+                )
+                
+                if unique_reco:
+                    st.success(f"✅ {len(unique_reco)} films recommandés pour toi !")
+                    st.markdown("<h2>🎬 Tes recommandations personnalisées</h2>", 
+                                unsafe_allow_html=True)
+                    
+                    cols = st.columns(3)
+                    for idx, movie in enumerate(unique_reco[:12]):
+                        with cols[idx % 3]:
+                            display_movie_card(movie, show_prediction=True)
+                else:
+                    st.warning("Aucune recommandation trouvée, essaie d'autres genres")
+                    
 elif page == "🎯 Recommandations":
     st.markdown("<h1>🎯 Recommandations Personnalisées</h1>", unsafe_allow_html=True)
     
