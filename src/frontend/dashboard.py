@@ -10,6 +10,8 @@ from typing import List, Dict
 import time
 import re
 import os
+from utils_tmdb import get_poster_url, get_movie_details_tmdb
+import re
 
 # Configuration de la page - DOIT ÊTRE LA PREMIÈRE COMMANDE STREAMLIT
 st.set_page_config(
@@ -187,8 +189,7 @@ def rate_movie(user_id, movie_id, rating):
         st.error(f"❌ Erreur lors de l'envoi à Kafka: {e}")
         return None
 
-from utils_tmdb import get_poster_url, get_movie_details_tmdb
-import re
+
 
 def display_movie_card(movie, show_prediction=False):
     """Affiche une carte de film avec poster TMDb"""
@@ -429,49 +430,43 @@ if page == "🏠 Accueil":
 
 # PAGE: RECOMMANDATIONS
 elif page == "👤 Mon Profil":
-    st.markdown("<h1>👤 Crée ton Profil Cinema</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#b3b3b3'>Dis-nous tes goûts pour des recommandations personnalisées</p>", unsafe_allow_html=True)
-    
-    # ============================================================
-    # ÉTAPE 1 : Genres préférés
-    # ============================================================
+    st.markdown("<h1>👤 Crée ton Profil Cinéma</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#b3b3b3'>Note quelques films pour recevoir des recommandations 100% personnalisées</p>", unsafe_allow_html=True)
+
+    # ── ÉTAPE 1 : Genres préférés ──────────────────────────────
     st.markdown("<h2>🎭 Tes genres préférés</h2>", unsafe_allow_html=True)
-    
+
     all_genres = [
         "Action", "Adventure", "Animation", "Comedy", "Crime",
         "Documentary", "Drama", "Fantasy", "Horror", "Mystery",
         "Romance", "Sci-Fi", "Thriller", "War", "Western"
     ]
-    
+
     selected_genres = st.multiselect(
-        "Choisis tes genres (max 5)",
+        "Choisis jusqu'à 5 genres",
         all_genres,
         max_selections=5,
         default=["Action", "Comedy"]
     )
-    
-    # ============================================================
-    # ÉTAPE 2 : Films favoris
-    # ============================================================
-    st.markdown("<h2>⭐ Tes films favoris</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#b3b3b3'>Note quelques films pour calibrer les recommandations</p>", unsafe_allow_html=True)
-    
-    # Films populaires à noter
+
+    # ── ÉTAPE 2 : Noter des films populaires ──────────────────
+    st.markdown("<h2>⭐ Note quelques films que tu connais</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#b3b3b3'>Laisse 0 si tu ne l'as pas vu</p>", unsafe_allow_html=True)
+
     popular_movies = {
-        1: "Toy Story (1995)",
-        260: "Star Wars (1977)", 
-        296: "Pulp Fiction (1994)",
-        318: "Shawshank Redemption (1994)",
-        356: "Forrest Gump (1994)",
-        480: "Jurassic Park (1993)",
-        2571: "Matrix, The (1999)",
-        58559: "Dark Knight (2008)",
-        79132: "Inception (2010)",
+        1:      "Toy Story (1995)",
+        260:    "Star Wars (1977)",
+        296:    "Pulp Fiction (1994)",
+        318:    "Shawshank Redemption (1994)",
+        356:    "Forrest Gump (1994)",
+        480:    "Jurassic Park (1993)",
+        2571:   "Matrix, The (1999)",
+        58559:  "Dark Knight (2008)",
+        79132:  "Inception (2010)",
         122882: "Interstellar (2014)"
     }
-    
+
     user_ratings = {}
-    
     cols = st.columns(2)
     for idx, (movie_id, title) in enumerate(popular_movies.items()):
         with cols[idx % 2]:
@@ -483,95 +478,142 @@ elif page == "👤 Mon Profil":
             )
             if rating > 0:
                 user_ratings[movie_id] = rating
-    
-    # ============================================================
-    # ÉTAPE 3 : Préférences supplémentaires
-    # ============================================================
-    st.markdown("<h2>🎬 Autres préférences</h2>", unsafe_allow_html=True)
-    
+
+    # ── ÉTAPE 3 : Préférences supplémentaires ─────────────────
+    st.markdown("<h2>🎬 Dernières préférences</h2>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
-    
+
     with col1:
         era = st.radio(
             "Époque préférée",
-            ["Peu importe", "Classiques (avant 1990)", 
+            ["Peu importe", "Classiques (avant 1990)",
              "Années 90-2000", "Films récents (après 2010)"]
         )
-    
+
     with col2:
         mood = st.radio(
             "Humeur du moment",
-            ["Peu importe", "Quelque chose de fun 😄", 
+            ["Peu importe", "Quelque chose de fun 😄",
              "Film intense 😮", "Histoire touchante 😢",
              "Faire peur 😱"]
         )
-    
-    # ============================================================
-    # GÉNÉRER LES RECOMMANDATIONS
-    # ============================================================
-    if st.button("🎯 Générer mes recommandations personnalisées", 
-                  type="primary", use_container_width=True):
-        
+
+    # ── BOUTON GÉNÉRER ─────────────────────────────────────────
+    if st.button("🎯 Générer mes recommandations personnalisées",
+                 type="primary", use_container_width=True):
+
         if not selected_genres and not user_ratings:
             st.warning("⚠️ Choisis au moins un genre ou note un film !")
         else:
-            with st.spinner("🤖 Analyse de tes préférences..."):
-                
-                # Construire le profil utilisateur
-                profile = {
-                    "genres": selected_genres,
-                    "rated_movies": user_ratings,
-                    "era": era,
-                    "mood": mood
+            with st.spinner("🤖 Analyse de tes préférences en cours..."):
+
+                # Choisir le user_id de référence selon les genres
+                genre_to_user = {
+                    "Action": 1, "Adventure": 2, "Animation": 3,
+                    "Comedy": 4, "Crime": 5, "Documentary": 6,
+                    "Drama": 7, "Fantasy": 8, "Horror": 9,
+                    "Mystery": 10, "Romance": 11, "Sci-Fi": 12,
+                    "Thriller": 13, "War": 14, "Western": 15
                 }
-                
-                # Utiliser un user_id basé sur les préférences
-                # (dans un vrai système on créerait un nouvel utilisateur)
-                base_user = 7  # user de référence
-                
-                # Récupérer les films filtrés par genre
-                all_reco = []
-                
-                genres_to_search = selected_genres if selected_genres else ["Action"]
-                
-                for genre in genres_to_search[:3]:
-                    response = requests.get(
-                        f"{API_URL}/recommend/{base_user}",
-                        params={"n": 10, "genre": genre},
-                        timeout=15
+                base_user = genre_to_user.get(
+                    selected_genres[0] if selected_genres else "Drama", 7
+                )
+
+                # Filtrer par époque
+                era_filter = None
+                if era == "Classiques (avant 1990)":
+                    era_filter = lambda t: any(
+                        str(y) in t for y in range(1900, 1990)
                     )
-                    if response.status_code == 200:
-                        data = response.json()
-                        all_reco.extend(data.get("recommendations", []))
-                
-                # Dédupliquer et trier
+                elif era == "Années 90-2000":
+                    era_filter = lambda t: any(
+                        str(y) in t for y in range(1990, 2001)
+                    )
+                elif era == "Films récents (après 2010)":
+                    era_filter = lambda t: any(
+                        str(y) in t for y in range(2010, 2030)
+                    )
+
+                # Récupérer recommandations pour chaque genre choisi
+                all_reco = []
+                genres_to_search = selected_genres[:3] if selected_genres else ["Drama"]
+
+                for genre in genres_to_search:
+                    try:
+                        response = requests.get(
+                            f"{API_URL}/recommend/{base_user}",
+                            params={"n": 15, "genre": genre},
+                            timeout=15
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            all_reco.extend(data.get("recommendations", []))
+                    except Exception as e:
+                        st.warning(f"Erreur pour le genre {genre}: {e}")
+
+                # Dédupliquer
                 seen = set()
                 unique_reco = []
                 for movie in all_reco:
-                    if movie['movie_id'] not in seen:
-                        seen.add(movie['movie_id'])
-                        # Exclure les films déjà notés
-                        if movie['movie_id'] not in user_ratings:
+                    mid = movie['movie_id']
+                    if mid not in seen and mid not in user_ratings:
+                        seen.add(mid)
+                        # Appliquer filtre époque
+                        if era_filter is None or era_filter(movie.get('title', '')):
                             unique_reco.append(movie)
-                
-                # Trier par note prédite
-                unique_reco.sort(
-                    key=lambda x: x['predicted_rating'], 
-                    reverse=True
-                )
-                
-                if unique_reco:
-                    st.success(f"✅ {len(unique_reco)} films recommandés pour toi !")
-                    st.markdown("<h2>🎬 Tes recommandations personnalisées</h2>", 
-                                unsafe_allow_html=True)
-                    
-                    cols = st.columns(3)
-                    for idx, movie in enumerate(unique_reco[:12]):
-                        with cols[idx % 3]:
-                            display_movie_card(movie, show_prediction=True)
+
+                # Boost des films selon l'humeur
+                mood_genres = {
+                    "Quelque chose de fun 😄": ["Comedy", "Animation"],
+                    "Film intense 😮": ["Thriller", "Action"],
+                    "Histoire touchante 😢": ["Drama", "Romance"],
+                    "Faire peur 😱": ["Horror", "Mystery"]
+                }
+                if mood in mood_genres:
+                    boost_genres = mood_genres[mood]
+                    def boost_score(m):
+                        bonus = 0.3 if any(
+                            g in m.get('genres', '') for g in boost_genres
+                        ) else 0
+                        return m['predicted_rating'] + bonus
+                    unique_reco.sort(key=boost_score, reverse=True)
                 else:
-                    st.warning("Aucune recommandation trouvée, essaie d'autres genres")
-                    
+                    unique_reco.sort(
+                        key=lambda x: x['predicted_rating'], reverse=True
+                    )
+
+            # ── AFFICHAGE DES RÉSULTATS ────────────────────────
+            if unique_reco:
+                st.success(f"✅ {len(unique_reco)} films trouvés rien que pour toi !")
+
+                # Résumé du profil
+                st.markdown(f"""
+                <div style='background:#1a1a1a;border:1px solid #E50914;
+                            border-radius:12px;padding:20px;margin:15px 0;'>
+                    <h3 style='color:#E50914;margin:0 0 10px 0;'>🎭 Ton profil</h3>
+                    <p style='color:#b3b3b3;margin:4px 0;'>
+                        Genres : <b style='color:white'>{', '.join(selected_genres) if selected_genres else 'Non spécifié'}</b>
+                    </p>
+                    <p style='color:#b3b3b3;margin:4px 0;'>
+                        Films notés : <b style='color:white'>{len(user_ratings)}</b>
+                    </p>
+                    <p style='color:#b3b3b3;margin:4px 0;'>
+                        Humeur : <b style='color:white'>{mood}</b>
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("<h2>🎬 Tes recommandations personnalisées</h2>",
+                            unsafe_allow_html=True)
+
+                cols = st.columns(3)
+                for idx, movie in enumerate(unique_reco[:12]):
+                    with cols[idx % 3]:
+                        display_movie_card(movie, show_prediction=True)
+            else:
+                st.warning("Aucune recommandation trouvée. Essaie d'autres genres ou une autre époque.")
+                
+                             
 elif page == "🎯 Recommandations":
     st.markdown("<h1>🎯 Recommandations Personnalisées</h1>", unsafe_allow_html=True)
     

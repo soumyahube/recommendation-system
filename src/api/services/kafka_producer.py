@@ -1,7 +1,7 @@
 from kafka import KafkaProducer
 import json
 import logging
-import datetime
+from datetime import datetime 
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM python:3.10-slim
 
 WORKDIR /app
 
@@ -9,5 +9,7 @@ COPY . .
 
 EXPOSE 8501
 
-# ✅ ENLEVEZ le .py ici (il est déjà dans le nom du fichier)
-CMD ["streamlit", "run", "dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "dashboard.py", \
+     "--server.port=8501", \
+     "--server.address=0.0.0.0", \
+     "--server.headless=true"]

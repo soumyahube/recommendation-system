@@ -224,7 +224,8 @@ async def rate_movie(rating: RatingCreate):
         logger.info(f"📝 Nouvelle notation: User {rating.user_id}, Movie {rating.movie_id}, Rating {rating.rating}")
         
         # Envoyer à Kafka
-        success = get_kafka_producer.send_rating(
+        producer = get_kafka_producer()
+        success = producer.send_rating(
             user_id=rating.user_id,
             movie_id=rating.movie_id,
             rating=rating.rating
